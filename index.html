@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcript Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .hide { display: none; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="max-w-4xl mx-auto p-6">
+        <h1 class="text-2xl font-bold mb-6">Media Transcript Tool</h1>
+        
+        <div class="bg-white p-6 rounded-lg shadow-sm">
+            <div class="space-y-4">
+                <div>
+                    <label for="apiKey" class="block text-sm font-medium mb-2">AssemblyAI API Key</label>
+                    <input 
+                        type="password" 
+                        id="apiKey" 
+                        class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                        placeholder="Enter your AssemblyAI API key"
+                    >
+                </div>
+
+                <div>
+                    <label for="url" class="block text-sm font-medium mb-2">Media URL</label>
+                    <input 
+                        type="text" 
+                        id="url" 
+                        class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                        placeholder="Enter URL (YouTube, Instagram, TikTok, or webpage)"
+                    >
+                </div>
+
+                <button 
+                    onclick="getTranscript()" 
+                    id="submitBtn"
+                    class="w-full bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                    Get Transcript
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading indicator -->
+        <div id="loading" class="hide mt-4 text-center">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+            <p class="text-center mt-2">Processing... This may take a few minutes.</p>
+        </div>
+
+        <!-- Error message -->
+        <div id="error" class="hide mt-4 p-4 bg-red-50 text-red-700 border border-red-200 rounded-lg"></div>
+
+        <!-- Results section -->
+        <div id="results" class="hide mt-6">
+            <div class="bg-white p-6 rounded-lg shadow-sm">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold">Transcript</h2>
+                    <button
+                        onclick="copyTranscript()"
+                        id="copyBtn"
+                        class="px-3 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+                    >
+                        Copy
+                    </button>
+                </div>
+                
+                <div class="bg-gray-50 p-6 rounded-lg border">
+                    <pre id="transcript" class="whitespace-pre-wrap font-mono text-sm"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function getTranscript() {
+            const apiKey = document.getElementById('apiKey').value;
+            const url = document.getElementById('url').value;
+            const submitBtn = document.getElementById('submitBtn');
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            const results = document.getElementById('results');
+
+            if (!apiKey || !url) {
+                showError('Please enter both API key and URL');
+                return;
+            }
+
+            // Reset UI
+            error.classList.add('hide');
+            results.classList.add('hide');
+            loading.classList.remove('hide');
+            submitBtn.disabled = true;
+
+            try {
+                // First, upload the audio URL
+                const uploadResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
+                    method: 'POST',
+                    headers: {
+                        'authorization': apiKey,
+                        'content-type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        audio_url: url
+                    })
+                });
+
+                if (!uploadResponse.ok) {
+                    throw new Error('Failed to submit URL for transcription');
+                }
+
+                const uploadData = await uploadResponse.json();
+                const transcriptId = uploadData.id;
+
+                // Poll for completion
+                while (true) {
+                    const pollingResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
+                        headers: {
+                            'authorization': apiKey
+                        }
+                    });
+
+                    const transcriptionStatus = await pollingResponse.json();
+
+                    if (transcriptionStatus.status === 'completed') {
+                        document.getElementById('transcript').textContent = transcriptionStatus.text;
+                        loading.classList.add('hide');
+                        results.classList.remove('hide');
+                        break;
+                    } else if (transcriptionStatus.status === 'error') {
+                        throw new Error('Transcription failed: ' + transcriptionStatus.error);
+                    }
+
+                    // Wait before polling again
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                }
+            } catch (err) {
+                showError(err.message);
+            } finally {
+                loading.classList.add('hide');
+                submitBtn.disabled = false;
+            }
+        }
+
+        function showError(message) {
+            const error = document.getElementById('error');
+            error.textContent = message;
+            error.classList.remove('hide');
+        }
+
+        function copyTranscript() {
+            const transcript = document.getElementById('transcript').textContent;
+            navigator.clipboard.writeText(transcript);
+            
+            const copyBtn = document.getElementById('copyBtn');
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => {
+                copyBtn.textContent = 'Copy';
+            }, 2000);
+        }
+    </script>
+</body>
+</html>
