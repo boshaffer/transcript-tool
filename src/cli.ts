@@ -12,6 +12,7 @@ USAGE:
 OPTIONS:
   --output, -o <dir>       Output directory (default: ./output/<video-name>)
   --max-clips, -n <num>    Max clips to generate (default: 5)
+  --model, -m <path>       Path to whisper.cpp model file (auto-detected by default)
   --width <num>            Target width (default: 1080)
   --height <num>           Target height (default: 1920)
   --caption-size <num>     Caption font size (default: 22)
@@ -21,8 +22,14 @@ OPTIONS:
   --skip-clip-id           Skip clip identification (use existing clips.json)
 
 ENVIRONMENT VARIABLES:
-  ASSEMBLYAI_API_KEY       AssemblyAI API key for transcription
-  ANTHROPIC_API_KEY        Anthropic API key for clip identification
+  ANTHROPIC_API_KEY        Anthropic API key (for clip ID + face detection)
+  WHISPER_CPP_PATH         Path to whisper.cpp binary (optional, auto-detected)
+  WHISPER_MODEL_PATH       Path to whisper .bin model (optional, auto-detected)
+
+PREREQUISITES:
+  - ffmpeg + ffprobe (with libx264, libass)
+  - whisper.cpp (https://github.com/ggerganov/whisper.cpp)
+  - A whisper model (e.g. ggml-base.bin)
 
 EXAMPLES:
   # Full pipeline
@@ -30,6 +37,9 @@ EXAMPLES:
 
   # Custom output and clip count
   npx tsx src/cli.ts ./input/podcast.mp4 -o ./output/my-clips -n 3
+
+  # Specify whisper model
+  npx tsx src/cli.ts ./input/podcast.mp4 -m ./models/ggml-small.bin
 
   # Resume from existing transcript
   npx tsx src/cli.ts ./input/podcast.mp4 --skip-transcribe
@@ -51,6 +61,7 @@ async function main() {
 
   // Parse options
   let outputDir = "";
+  let whisperModel: string | undefined;
   let maxClips = 5;
   let targetWidth = 1080;
   let targetHeight = 1920;
@@ -65,6 +76,10 @@ async function main() {
       case "--output":
       case "-o":
         outputDir = args[++i];
+        break;
+      case "--model":
+      case "-m":
+        whisperModel = args[++i];
         break;
       case "--max-clips":
       case "-n":
@@ -99,24 +114,19 @@ async function main() {
     outputDir = path.resolve("./output", videoName);
   }
 
-  const assemblyaiApiKey = process.env.ASSEMBLYAI_API_KEY;
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-
-  if (!assemblyaiApiKey) {
-    console.error("Error: ASSEMBLYAI_API_KEY environment variable is required");
-    process.exit(1);
-  }
 
   if (!anthropicApiKey) {
     console.error("Error: ANTHROPIC_API_KEY environment variable is required");
+    console.error("  (used for clip identification and face detection)");
     process.exit(1);
   }
 
   const config: PipelineConfig = {
-    assemblyaiApiKey,
     anthropicApiKey,
     videoPath,
     outputDir,
+    whisperModel,
     maxClips,
     targetWidth,
     targetHeight,

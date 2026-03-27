@@ -5,15 +5,18 @@ AI-powered pipeline that takes long-form video and produces viral short-form cli
 
 ## Pipeline Workflow
 ```
-Raw Video → Transcribe (AssemblyAI) → Identify Clips (Claude) → Extract SRT Timecodes
+Raw Video → Transcribe (whisper.cpp) → Identify Clips (Claude) → Extract SRT Timecodes
 → Cut Clips (ffmpeg) → Detect Face (Claude Vision) → Crop to Vertical (ffmpeg)
 → Add Captions (ffmpeg+ASS) → Final Clips Ready for Social Media
 ```
 
 ## Quick Start
 ```bash
-# Set API keys
-export ASSEMBLYAI_API_KEY="your-key"
+# Install whisper.cpp (one-time setup)
+git clone https://github.com/ggerganov/whisper.cpp && cd whisper.cpp && make
+bash models/download-ggml-model.sh base
+
+# Set API key (only Anthropic needed — transcription is local + free)
 export ANTHROPIC_API_KEY="your-key"
 
 # Run the full pipeline
@@ -21,6 +24,9 @@ npm run clip ./input/my-podcast.mp4
 
 # With options
 npm run clip -- ./input/my-podcast.mp4 -n 3 -o ./output/my-clips --caption-pos center
+
+# Specify whisper model
+npm run clip -- ./input/podcast.mp4 -m ./whisper.cpp/models/ggml-small.bin
 ```
 
 ## CLI Options
@@ -29,6 +35,7 @@ npx tsx src/cli.ts <video-path> [options]
 
 --output, -o <dir>       Output directory (default: ./output/<video-name>)
 --max-clips, -n <num>    Max clips to generate (default: 5)
+--model, -m <path>       Path to whisper.cpp .bin model (auto-detected)
 --width <num>            Target width (default: 1080)
 --height <num>           Target height (default: 1920)
 --caption-size <num>     Caption font size (default: 22)
@@ -47,7 +54,7 @@ src/
   styles.css              — TailwindCSS v4 styles
   pipeline/
     index.ts              — Pipeline orchestrator
-    transcribe.ts         — AssemblyAI transcription + SRT generation
+    transcribe.ts         — whisper.cpp transcription + SRT generation
     identify-clips.ts     — Claude AI clip identification
     extract-srt.ts        — SRT timestamp matching for each clip
     cut-video.ts          — ffmpeg video cutting + vertical cropping
@@ -67,11 +74,13 @@ public/                   — Static assets
 
 ## Pipeline Steps Explained
 
-### Step 1: Transcribe (AssemblyAI)
-- Uploads video to AssemblyAI
-- Gets full transcript text + word-level timestamps
+### Step 1: Transcribe (whisper.cpp — local, free)
+- Extracts audio from video as 16kHz WAV via ffmpeg
+- Runs whisper.cpp locally for transcription (no API key needed)
+- Gets word-level timestamps from Whisper JSON output
 - Generates SRT caption file from word timestamps
 - Outputs: `transcript.txt`, `transcript.srt`, `words.json`
+- Models: tiny (fastest) → base (default) → small → medium → large (best quality)
 
 ### Step 2: Identify Clips (Claude)
 - Sends transcript + SRT to Claude
@@ -108,13 +117,14 @@ public/                   — Static assets
 - Outputs: `clip-N-final.mp4`
 
 ## Environment Variables
-- `ASSEMBLYAI_API_KEY` — Required for transcription
 - `ANTHROPIC_API_KEY` — Required for clip identification and face detection
+- `WHISPER_CPP_PATH` — Optional, path to whisper.cpp binary (auto-detected)
+- `WHISPER_MODEL_PATH` — Optional, path to .bin model file (auto-detected)
 
 ## Prerequisites
 - Node.js 18+
-- ffmpeg (with libx264, libass support)
-- ffprobe
+- ffmpeg + ffprobe (with libx264, libass support)
+- whisper.cpp (https://github.com/ggerganov/whisper.cpp) + a model file
 
 ## Remotion Studio
 The project also includes Remotion compositions for visual editing:

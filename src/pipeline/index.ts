@@ -8,10 +8,10 @@ import { detectFacePosition } from "./detect-face";
 import { addCaptions } from "./add-captions";
 
 export interface PipelineConfig {
-  assemblyaiApiKey: string;
   anthropicApiKey: string;
   videoPath: string;
   outputDir: string;
+  whisperModel?: string;
   maxClips?: number;
   targetWidth?: number;
   targetHeight?: number;
@@ -28,10 +28,10 @@ export interface PipelineConfig {
 
 export async function runPipeline(config: PipelineConfig): Promise<void> {
   const {
-    assemblyaiApiKey,
     anthropicApiKey,
     videoPath,
     outputDir,
+    whisperModel,
     maxClips = 5,
     targetWidth = 1080,
     targetHeight = 1920,
@@ -53,23 +53,23 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
   console.log("=".repeat(60));
 
   // ─── STEP 1: Get video info ─────────────────────────────────
-  console.log("\n📹 STEP 1: Analyzing source video...");
+  console.log("\nSTEP 1: Analyzing source video...");
   const videoInfo = getVideoInfo(videoPath);
   console.log(
     `  Source: ${videoInfo.width}x${videoInfo.height}, ${(videoInfo.durationMs / 1000).toFixed(1)}s`
   );
 
-  // ─── STEP 2: Transcribe ─────────────────────────────────────
+  // ─── STEP 2: Transcribe with Whisper ───────────────────────
   let transcript: string;
   let srt: string;
 
   if (skipTranscribe) {
-    console.log("\n📝 STEP 2: Loading existing transcript...");
+    console.log("\nSTEP 2: Loading existing transcript...");
     transcript = fs.readFileSync(path.join(outputDir, "transcript.txt"), "utf-8");
     srt = fs.readFileSync(path.join(outputDir, "transcript.srt"), "utf-8");
   } else {
-    console.log("\n📝 STEP 2: Transcribing video...");
-    const result = await transcribeVideo(assemblyaiApiKey, videoPath, outputDir);
+    console.log("\nSTEP 2: Transcribing video with whisper.cpp...");
+    const result = await transcribeVideo(videoPath, outputDir, whisperModel);
     transcript = result.text;
     srt = result.srt;
   }
@@ -78,12 +78,12 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
   let clips;
 
   if (skipClipId) {
-    console.log("\n🎯 STEP 3: Loading existing clip segments...");
+    console.log("\nSTEP 3: Loading existing clip segments...");
     clips = JSON.parse(
       fs.readFileSync(path.join(outputDir, "clips.json"), "utf-8")
     );
   } else {
-    console.log("\n🎯 STEP 3: Identifying best clip segments...");
+    console.log("\nSTEP 3: Identifying best clip segments with Claude...");
     clips = await identifyClips(
       anthropicApiKey,
       transcript,
@@ -94,15 +94,15 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
   }
 
   // ─── STEP 4: Extract SRT timecodes ─────────────────────────
-  console.log("\n⏱️  STEP 4: Matching clips to SRT timestamps...");
+  console.log("\nSTEP 4: Matching clips to SRT timestamps...");
   const timecodes = await extractClipTimecodes(clips, srt, outputDir);
 
   // ─── STEP 5: Cut clips from source video ───────────────────
-  console.log("\n✂️  STEP 5: Cutting clips from source video...");
+  console.log("\nSTEP 5: Cutting clips from source video...");
   const rawClips = await cutClips(videoPath, timecodes, outputDir);
 
   // ─── STEP 6: Detect face + crop to vertical ────────────────
-  console.log("\n👤 STEP 6: Detecting faces and cropping to vertical...");
+  console.log("\nSTEP 6: Detecting faces and cropping to vertical...");
   const clipsDir = path.join(outputDir, "clips");
 
   for (const clip of rawClips) {

@@ -1,14 +1,11 @@
+import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
-
-const ASSEMBLYAI_BASE = "https://api.assemblyai.com/v2";
 
 interface TranscriptWord {
   text: string;
   start: number;
   end: number;
-  confidence: number;
-  speaker?: string;
 }
 
 interface TranscriptResult {
@@ -17,40 +14,124 @@ interface TranscriptResult {
   srt: string;
 }
 
-async function uploadFile(
-  apiKey: string,
-  filePath: string
-): Promise<string> {
-  const data = fs.readFileSync(filePath);
-  const response = await fetch(`${ASSEMBLYAI_BASE}/upload`, {
-    method: "POST",
-    headers: {
-      authorization: apiKey,
-      "content-type": "application/octet-stream",
-    },
-    body: data,
-  });
-  if (!response.ok) throw new Error(`Upload failed: ${response.statusText}`);
-  const json = (await response.json()) as { upload_url: string };
-  return json.upload_url;
+interface WhisperToken {
+  text: string;
+  timestamps: { from: string; to: string };
+  offsets: { from: number; to: number };
 }
 
-async function pollTranscript(
-  apiKey: string,
-  transcriptId: string
-): Promise<any> {
-  while (true) {
-    const response = await fetch(
-      `${ASSEMBLYAI_BASE}/transcript/${transcriptId}`,
-      { headers: { authorization: apiKey } }
-    );
-    const data = await response.json();
-    if (data.status === "completed") return data;
-    if (data.status === "error")
-      throw new Error(`Transcription failed: ${data.error}`);
-    console.log("  Transcription status:", data.status);
-    await new Promise((r) => setTimeout(r, 3000));
+interface WhisperSegment {
+  text: string;
+  timestamps: { from: string; to: string };
+  offsets: { from: number; to: number };
+  tokens: WhisperToken[];
+}
+
+interface WhisperJson {
+  transcription: WhisperSegment[];
+}
+
+function findWhisperBinary(): string {
+  // Check common locations for whisper.cpp binary
+  const candidates = [
+    "whisper-cli",        // if installed via package manager
+    "whisper",            // alias
+    "main",              // default build name from whisper.cpp
+  ];
+
+  // Check WHISPER_CPP_PATH env var first
+  if (process.env.WHISPER_CPP_PATH) {
+    const custom = process.env.WHISPER_CPP_PATH;
+    if (fs.existsSync(custom)) return custom;
   }
+
+  for (const name of candidates) {
+    try {
+      execSync(`which ${name}`, { stdio: "pipe" });
+      return name;
+    } catch {
+      // not found, try next
+    }
+  }
+
+  throw new Error(
+    `whisper.cpp binary not found. Install it:\n` +
+      `  git clone https://github.com/ggerganov/whisper.cpp && cd whisper.cpp && make\n` +
+      `  # Download a model:\n` +
+      `  bash models/download-ggml-model.sh base\n` +
+      `Or set WHISPER_CPP_PATH to the binary location.`
+  );
+}
+
+function findWhisperModel(): string {
+  // Check WHISPER_MODEL_PATH env var first
+  if (process.env.WHISPER_MODEL_PATH) {
+    const custom = process.env.WHISPER_MODEL_PATH;
+    if (fs.existsSync(custom)) return custom;
+  }
+
+  // Check common locations
+  const homeDir = process.env.HOME || process.env.USERPROFILE || "";
+  const candidates = [
+    path.join(homeDir, ".local/share/whisper.cpp/ggml-base.bin"),
+    path.join(homeDir, ".cache/whisper/ggml-base.bin"),
+    path.join(homeDir, "whisper.cpp/models/ggml-base.bin"),
+    "./models/ggml-base.bin",
+    "./whisper.cpp/models/ggml-base.bin",
+    // Also check for other model sizes
+    path.join(homeDir, ".local/share/whisper.cpp/ggml-small.bin"),
+    path.join(homeDir, "whisper.cpp/models/ggml-small.bin"),
+    "./models/ggml-small.bin",
+  ];
+
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+
+  throw new Error(
+    `Whisper model not found. Download one:\n` +
+      `  cd whisper.cpp && bash models/download-ggml-model.sh base\n` +
+      `Or set WHISPER_MODEL_PATH to the .bin file location.`
+  );
+}
+
+function extractAudioAsWav(videoPath: string, outputDir: string): string {
+  const wavPath = path.join(outputDir, "audio.wav");
+  console.log("  Extracting audio to 16kHz WAV...");
+  execSync(
+    `ffmpeg -y -i "${videoPath}" -ar 16000 -ac 1 -c:a pcm_s16le "${wavPath}"`,
+    { stdio: "pipe" }
+  );
+  return wavPath;
+}
+
+function parseWhisperJson(jsonPath: string): {
+  text: string;
+  words: TranscriptWord[];
+} {
+  const raw = fs.readFileSync(jsonPath, "utf-8");
+  const data: WhisperJson = JSON.parse(raw);
+
+  const allWords: TranscriptWord[] = [];
+  const textParts: string[] = [];
+
+  for (const segment of data.transcription) {
+    textParts.push(segment.text.trim());
+
+    if (segment.tokens) {
+      for (const token of segment.tokens) {
+        const text = token.text.trim();
+        if (!text) continue;
+        allWords.push({
+          text,
+          start: token.offsets.from,
+          end: token.offsets.to,
+        });
+      }
+    }
+  }
+
+  return { text: textParts.join(" "), words: allWords };
 }
 
 function wordsToSrt(words: TranscriptWord[]): string {
@@ -91,42 +172,40 @@ function pad3(n: number): string {
 }
 
 export async function transcribeVideo(
-  apiKey: string,
   videoPath: string,
-  outputDir: string
+  outputDir: string,
+  model?: string
 ): Promise<TranscriptResult> {
-  console.log("[1/3] Uploading video for transcription...");
+  const whisperBin = findWhisperBinary();
+  const whisperModel = model || findWhisperModel();
 
-  let audioUrl: string;
-  if (videoPath.startsWith("http://") || videoPath.startsWith("https://")) {
-    audioUrl = videoPath;
-  } else {
-    audioUrl = await uploadFile(apiKey, videoPath);
+  console.log(`  Using whisper.cpp: ${whisperBin}`);
+  console.log(`  Model: ${whisperModel}`);
+
+  // Step 1: Extract audio as 16kHz WAV
+  console.log("[1/3] Extracting audio from video...");
+  const wavPath = extractAudioAsWav(videoPath, outputDir);
+
+  // Step 2: Run whisper.cpp with JSON output for word-level timestamps
+  console.log("[2/3] Transcribing with whisper.cpp (this may take a while)...");
+  const jsonOutputBase = path.join(outputDir, "whisper-output");
+
+  execSync(
+    `"${whisperBin}" -m "${whisperModel}" -f "${wavPath}" --output-json -of "${jsonOutputBase}" --print-progress`,
+    { stdio: "inherit", timeout: 600000 } // 10 min timeout
+  );
+
+  // Step 3: Parse results
+  console.log("[3/3] Parsing transcription results...");
+  const jsonPath = `${jsonOutputBase}.json`;
+
+  if (!fs.existsSync(jsonPath)) {
+    throw new Error(
+      `Whisper output not found at ${jsonPath}. Check whisper.cpp installation.`
+    );
   }
 
-  console.log("[2/3] Starting transcription...");
-  const response = await fetch(`${ASSEMBLYAI_BASE}/transcript`, {
-    method: "POST",
-    headers: {
-      authorization: apiKey,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      audio_url: audioUrl,
-      speaker_labels: true,
-    }),
-  });
-
-  if (!response.ok)
-    throw new Error(`Transcription request failed: ${response.statusText}`);
-
-  const { id } = (await response.json()) as { id: string };
-  console.log("  Transcript ID:", id);
-
-  console.log("[3/3] Waiting for transcription to complete...");
-  const result = await pollTranscript(apiKey, id);
-
-  const words: TranscriptWord[] = result.words || [];
+  const { text, words } = parseWhisperJson(jsonPath);
   const srt = wordsToSrt(words);
 
   // Save outputs
@@ -134,12 +213,15 @@ export async function transcribeVideo(
   const srtPath = path.join(outputDir, "transcript.srt");
   const wordsPath = path.join(outputDir, "words.json");
 
-  fs.writeFileSync(transcriptPath, result.text);
+  fs.writeFileSync(transcriptPath, text);
   fs.writeFileSync(srtPath, srt);
   fs.writeFileSync(wordsPath, JSON.stringify(words, null, 2));
 
   console.log("  Transcript saved to:", transcriptPath);
   console.log("  SRT saved to:", srtPath);
 
-  return { text: result.text, words, srt };
+  // Clean up WAV file (large)
+  fs.unlinkSync(wavPath);
+
+  return { text, words, srt };
 }
