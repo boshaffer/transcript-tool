@@ -1,14 +1,17 @@
 {
-  "name": "remotion-video-editor",
+  "name": "content-clip-magic",
   "version": "1.0.0",
-  "description": "AI-powered video editing with Remotion and Claude Code",
+  "description": "AI-powered pipeline: long-form video -> viral short clips with captions",
   "scripts": {
     "dev": "npx remotion studio",
     "build": "npx remotion render src/index.ts",
     "render": "npx remotion render src/index.ts",
-    "upgrade": "npx remotion upgrade"
+    "upgrade": "npx remotion upgrade",
+    "clip": "npx tsx src/cli.ts",
+    "pipeline": "npx tsx src/cli.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@remotion/cli": "4.0.261",
     "@remotion/player": "4.0.261",
     "@remotion/tailwind-v4": "4.0.261",
@@ -19,8 +22,10 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
 }

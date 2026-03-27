@@ -1,126 +1,144 @@
-# Remotion Video Editor - Claude Code Guide
+# Content Clip Magic - Claude Code Guide
 
 ## Project Overview
-This is a Remotion-based video editing project. Remotion lets you create videos programmatically using React components.
+AI-powered pipeline that takes long-form video and produces viral short-form clips with captions for YouTube Shorts, TikTok, and Instagram Reels.
 
-## Key Commands
-- `npm run dev` — Start the Remotion Studio (visual editor in browser)
-- `npm run render` — Render video to file (outputs to `out/` directory)
-- `npx remotion render src/index.ts <CompositionId> out/video.mp4` — Render a specific composition
-- `npx remotion still src/index.ts <CompositionId> out/still.png` — Render a single frame as image
+## Pipeline Workflow
+```
+Raw Video → Transcribe (AssemblyAI) → Identify Clips (Claude) → Extract SRT Timecodes
+→ Cut Clips (ffmpeg) → Detect Face (Claude Vision) → Crop to Vertical (ffmpeg)
+→ Add Captions (ffmpeg+ASS) → Final Clips Ready for Social Media
+```
+
+## Quick Start
+```bash
+# Set API keys
+export ASSEMBLYAI_API_KEY="your-key"
+export ANTHROPIC_API_KEY="your-key"
+
+# Run the full pipeline
+npm run clip ./input/my-podcast.mp4
+
+# With options
+npm run clip -- ./input/my-podcast.mp4 -n 3 -o ./output/my-clips --caption-pos center
+```
+
+## CLI Options
+```
+npx tsx src/cli.ts <video-path> [options]
+
+--output, -o <dir>       Output directory (default: ./output/<video-name>)
+--max-clips, -n <num>    Max clips to generate (default: 5)
+--width <num>            Target width (default: 1080)
+--height <num>           Target height (default: 1920)
+--caption-size <num>     Caption font size (default: 22)
+--caption-color <hex>    Caption color (default: #FFFFFF)
+--caption-pos <pos>      Caption position: bottom|center|top (default: bottom)
+--skip-transcribe        Skip transcription (use existing transcript)
+--skip-clip-id           Skip clip identification (use existing clips.json)
+```
 
 ## Project Structure
 ```
 src/
-  index.ts          — Entry point, registers the root component
-  Root.tsx           — Registers all compositions with their metadata
-  styles.css         — TailwindCSS v4 styles
-  compositions/      — Video compositions (scenes)
-    TextOverlay.tsx   — Animated text on colored background
-    ImageSlideshow.tsx — Slideshow with crossfade transitions
-    KenBurns.tsx      — Ken Burns zoom/pan effect on images
-    TitleCard.tsx     — Animated title card with subtitle
-    TransitionDemo.tsx — Scene transitions (fade, slide, wipe, zoom)
-  components/        — Reusable UI components
-public/              — Static assets (images, fonts, audio)
-remotion.config.ts   — Remotion + TailwindCSS configuration
+  cli.ts                  — CLI entry point
+  index.ts                — Remotion entry point
+  Root.tsx                — Registers Remotion compositions
+  styles.css              — TailwindCSS v4 styles
+  pipeline/
+    index.ts              — Pipeline orchestrator
+    transcribe.ts         — AssemblyAI transcription + SRT generation
+    identify-clips.ts     — Claude AI clip identification
+    extract-srt.ts        — SRT timestamp matching for each clip
+    cut-video.ts          — ffmpeg video cutting + vertical cropping
+    detect-face.ts        — Claude Vision face detection for smart crop
+    add-captions.ts       — ASS subtitle generation + caption burn-in
+  compositions/           — Remotion video compositions
+    TextOverlay.tsx       — Animated text on colored background
+    ImageSlideshow.tsx    — Slideshow with crossfade transitions
+    KenBurns.tsx          — Ken Burns zoom/pan effect
+    TitleCard.tsx         — Animated title card with subtitle
+    TransitionDemo.tsx    — Scene transitions (fade, slide, wipe, zoom)
+  components/             — Reusable UI components
+input/                    — Place source videos here
+output/                   — Generated clips output here
+public/                   — Static assets
 ```
 
-## Core Concepts
+## Pipeline Steps Explained
 
-### Compositions
-Each video is a `<Composition>` registered in `Root.tsx` with:
-- `id` — Unique identifier used for rendering
-- `component` — React component that renders the video
-- `durationInFrames` — Total frames (frames = seconds × fps)
-- `fps` — Frames per second (typically 30)
-- `width` / `height` — Video dimensions in pixels
-- `schema` — Zod schema for props validation
-- `defaultProps` — Default prop values
+### Step 1: Transcribe (AssemblyAI)
+- Uploads video to AssemblyAI
+- Gets full transcript text + word-level timestamps
+- Generates SRT caption file from word timestamps
+- Outputs: `transcript.txt`, `transcript.srt`, `words.json`
 
-### Hooks
-- `useCurrentFrame()` — Returns the current frame number (0-indexed)
-- `useVideoConfig()` — Returns `{ width, height, fps, durationInFrames }`
+### Step 2: Identify Clips (Claude)
+- Sends transcript + SRT to Claude
+- AI identifies the best 30-90 second segments for short-form content
+- Scores each clip's "hook" strength (1-10)
+- Outputs: `clips.json`
 
-### Animation Utilities
-- `interpolate(frame, inputRange, outputRange, options)` — Map frame numbers to animated values
-- `spring({ frame, fps, config })` — Physics-based spring animation
-- `<Sequence from={frame} durationInFrames={n}>` — Time-offset a section
-- `<AbsoluteFill>` — Full-canvas positioned container
+### Step 3: Extract SRT Timecodes
+- Matches each clip's transcript to the full SRT file
+- Extracts precise start/end timestamps
+- Generates per-clip SRT with timestamps relative to clip start
+- Outputs: `clip-N.srt`, `timecodes.json`
 
-### Media
-- `<Img src={url} />` — Display images (use Remotion's Img, not HTML img)
-- `<Video src={url} />` — Embed video clips
-- `<Audio src={url} />` — Add audio tracks
-- `<OffthreadVideo src={url} />` — Memory-efficient video embedding
+### Step 4: Cut Clips (ffmpeg)
+- Cuts each clip from the source video at the exact timestamps
+- Extracts a keyframe image from the middle of each clip
+- Outputs: `clip-N-raw.mp4`, `clip-N-keyframe.jpg`
 
-## How to Create a New Composition
+### Step 5: Detect Face (Claude Vision)
+- Sends keyframe image to Claude Vision
+- Gets X,Y coordinates of the speaker's face center
+- Used to position the vertical crop centered on the speaker
 
-1. Create a new file in `src/compositions/MyScene.tsx`:
-```tsx
-import React from "react";
-import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate } from "remotion";
-import { z } from "zod";
+### Step 6: Crop to Vertical (ffmpeg)
+- Calculates crop area centered on face position
+- Crops horizontal video to 9:16 aspect ratio
+- Scales to target dimensions (default 1080x1920)
+- Outputs: `clip-N-vertical.mp4`
 
-export const mySceneSchema = z.object({
-  title: z.string(),
-});
+### Step 7: Add Captions (ffmpeg + ASS)
+- Converts clip SRT to ASS subtitle format with styling
+- Burns styled captions directly into the video
+- Uppercase text, outline, configurable position
+- Outputs: `clip-N-final.mp4`
 
-export const MyScene: React.FC<z.infer<typeof mySceneSchema>> = ({ title }) => {
-  const frame = useCurrentFrame();
-  const { durationInFrames } = useVideoConfig();
+## Environment Variables
+- `ASSEMBLYAI_API_KEY` — Required for transcription
+- `ANTHROPIC_API_KEY` — Required for clip identification and face detection
 
-  const opacity = interpolate(frame, [0, 30], [0, 1], {
-    extrapolateRight: "clamp",
-  });
+## Prerequisites
+- Node.js 18+
+- ffmpeg (with libx264, libass support)
+- ffprobe
 
-  return (
-    <AbsoluteFill className="flex items-center justify-center bg-black">
-      <h1 style={{ color: "white", fontSize: 80, opacity }}>{title}</h1>
-    </AbsoluteFill>
-  );
-};
-```
-
-2. Register it in `src/Root.tsx`:
-```tsx
-import { MyScene, mySceneSchema } from "./compositions/MyScene";
-
-// Add inside the RemotionRoot fragment:
-<Composition
-  id="MyScene"
-  component={MyScene}
-  durationInFrames={150}
-  fps={30}
-  width={1920}
-  height={1080}
-  schema={mySceneSchema}
-  defaultProps={{ title: "Hello" }}
-/>
-```
-
-3. Render it:
+## Remotion Studio
+The project also includes Remotion compositions for visual editing:
 ```bash
-npx remotion render src/index.ts MyScene out/my-scene.mp4
+npm run dev    # Opens Remotion Studio in browser
 ```
 
-## Available Compositions
+### Available Compositions
 - **TextOverlay** — Animated text with spring entrance/exit
-- **ImageSlideshow** — Crossfading image slideshow with subtle zoom
-- **KenBurns** — Cinematic zoom/pan effect on a single image
-- **TitleCard** — Animated title + subtitle with divider line
-- **TransitionDemo** — Demonstrates fade/slide/wipe/zoom transitions
+- **ImageSlideshow** — Crossfading image slideshow
+- **KenBurns** — Cinematic zoom/pan effect
+- **TitleCard** — Animated title + subtitle
+- **TransitionDemo** — fade/slide/wipe/zoom transitions
 
-## Tips for Editing
-- Frame 0 is the first frame; last frame is `durationInFrames - 1`
-- Use `interpolate()` with `extrapolateLeft: "clamp"` and `extrapolateRight: "clamp"` to prevent values from exceeding the output range
-- TailwindCSS classes work in all components (via `className`)
-- Place static assets in `public/` and reference them with `staticFile("filename.png")`
-- Use `spring()` for natural-feeling animations
-- Props with Zod schemas enable type-safe editing in Remotion Studio
+### Remotion Core Concepts
+- `useCurrentFrame()` — Current frame number (0-indexed)
+- `useVideoConfig()` — Returns `{ width, height, fps, durationInFrames }`
+- `interpolate(frame, inputRange, outputRange)` — Animate values
+- `spring({ frame, fps, config })` — Physics-based animation
+- `<AbsoluteFill>` — Full-canvas container
+- `<Sequence from={frame}>` — Time-offset sections
 
-## Remotion Documentation
-For detailed API docs, append `.md` to any remotion.dev URL:
+### Remotion Documentation
+Append `.md` to any remotion.dev URL for markdown:
 - `https://remotion.dev/docs/interpolate.md`
 - `https://remotion.dev/docs/spring.md`
 - `https://remotion.dev/docs/sequence.md`
