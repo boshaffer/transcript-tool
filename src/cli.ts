@@ -16,7 +16,7 @@ OPTIONS:
   --width <num>            Target width (default: 1080)
   --height <num>           Target height (default: 1920)
   --caption-size <num>     Caption font size (default: 22)
-  --caption-color <hex>    Caption color (default: #FFFFFF)
+  --caption-color <hex>    Caption highlight color (default: #FFD700)
   --caption-pos <pos>      Caption position: bottom|center|top (default: bottom)
   --skip-transcribe        Skip transcription (use existing transcript.txt/srt)
   --skip-clip-id           Skip clip identification (use existing clips.json)
@@ -66,7 +66,7 @@ async function main() {
   let targetWidth = 1080;
   let targetHeight = 1920;
   let captionSize = 22;
-  let captionColor = "#FFFFFF";
+  let captionColor = "#FFD700";
   let captionPos: "bottom" | "center" | "top" = "bottom";
   let skipTranscribe = false;
   let skipClipId = false;
@@ -132,9 +132,8 @@ async function main() {
     targetHeight,
     captionStyle: {
       fontSize: captionSize,
-      primaryColor: captionColor,
+      highlightColor: captionColor,
       position: captionPos,
-      bold: true,
     },
     skipTranscribe,
     skipClipId,

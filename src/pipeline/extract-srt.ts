@@ -211,3 +211,36 @@ export async function extractClipTimecodes(
 
   return results;
 }
+
+/**
+ * Extract per-clip word arrays from the full words.json,
+ * with timestamps adjusted to be relative to each clip's start.
+ */
+export function extractClipWords(
+  allWords: Array<{ text: string; start: number; end: number }>,
+  timecodes: ClipTimecodes[]
+): Map<number, Array<{ text: string; start: number; end: number }>> {
+  const result = new Map<
+    number,
+    Array<{ text: string; start: number; end: number }>
+  >();
+
+  for (const tc of timecodes) {
+    // Find words that fall within this clip's time range
+    const clipWords = allWords
+      .filter((w) => w.start >= tc.startMs && w.end <= tc.endMs)
+      .map((w) => ({
+        text: w.text,
+        start: w.start - tc.startMs,
+        end: w.end - tc.startMs,
+      }));
+
+    result.set(tc.clipNumber, clipWords);
+
+    console.log(
+      `  Clip ${tc.clipNumber}: ${clipWords.length} words extracted`
+    );
+  }
+
+  return result;
+}

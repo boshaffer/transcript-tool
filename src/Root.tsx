@@ -5,6 +5,7 @@ import { ImageSlideshow, imageSlideshowSchema } from "./compositions/ImageSlides
 import { KenBurns, kenBurnsSchema } from "./compositions/KenBurns";
 import { TitleCard, titleCardSchema } from "./compositions/TitleCard";
 import { TransitionDemo, transitionDemoSchema } from "./compositions/TransitionDemo";
+import { CaptionedClip, captionedClipSchema } from "./compositions/CaptionedClip";
 import "./styles.css";
 
 export const RemotionRoot: React.FC = () => {
@@ -87,6 +88,25 @@ export const RemotionRoot: React.FC = () => {
           text2: "Scene Two",
           transitionType: "fade" as const,
           transitionDuration: 30,
+        }}
+      />
+      <Composition
+        id="CaptionedClip"
+        component={CaptionedClip}
+        durationInFrames={150}
+        fps={30}
+        width={1080}
+        height={1920}
+        schema={captionedClipSchema}
+        defaultProps={{
+          videoSrc: "",
+          words: [],
+          highlightColor: "#FFD700",
+          textColor: "#FFFFFF",
+          fontSize: 68,
+          position: "bottom" as const,
+          wordsPerGroup: 4,
+          fontFamily: "Inter, Arial, sans-serif",
         }}
       />
     </>
