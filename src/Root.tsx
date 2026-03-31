@@ -93,7 +93,7 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="CaptionedClip"
         component={CaptionedClip}
-        durationInFrames={150}
+        durationInFrames={90000}
         fps={30}
         width={1080}
         height={1920}
