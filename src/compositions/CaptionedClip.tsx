@@ -51,6 +51,10 @@ function groupWords(
   return groups;
 }
 
+// Lookahead in ms — highlight the word slightly before it's spoken
+// so the visual feels in-sync with audio (human perception compensated)
+const HIGHLIGHT_LOOKAHEAD_MS = 150;
+
 export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   videoSrc,
   words,
@@ -64,20 +68,26 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // Resolve video source: use staticFile() for filenames, pass URLs through
   const resolvedVideoSrc = useMemo(() => {
-    if (videoSrc.startsWith("http://") || videoSrc.startsWith("https://") || videoSrc.startsWith("file://")) {
+    if (
+      videoSrc.startsWith("http://") ||
+      videoSrc.startsWith("https://") ||
+      videoSrc.startsWith("file://")
+    ) {
       return videoSrc;
     }
     return staticFile(videoSrc);
   }, [videoSrc]);
 
   const currentTimeMs = (frame / fps) * 1000;
-  const groups = groupWords(words, wordsPerGroup);
+  // Apply lookahead: treat current time as slightly ahead for highlight matching
+  const highlightTimeMs = currentTimeMs + HIGHLIGHT_LOOKAHEAD_MS;
 
-  // Find the current group
+  const groups = useMemo(() => groupWords(words, wordsPerGroup), [words, wordsPerGroup]);
+
+  // Find the current group (use lookahead time for group matching too)
   const currentGroup = groups.find(
-    (g) => currentTimeMs >= g.startMs && currentTimeMs <= g.endMs
+    (g) => highlightTimeMs >= g.startMs && currentTimeMs <= g.endMs
   );
 
   // Position styles
@@ -126,14 +136,14 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
                 display: "flex",
                 flexWrap: "wrap",
                 justifyContent: "center",
-                gap: "8px 12px",
+                gap: "10px 16px",
                 maxWidth: "90%",
               }}
             >
               {currentGroup.words.map((word, idx) => {
                 const isActive =
-                  currentTimeMs >= word.start && currentTimeMs <= word.end;
-                const isPast = currentTimeMs > word.end;
+                  highlightTimeMs >= word.start && highlightTimeMs <= word.end;
+                const isPast = highlightTimeMs > word.end;
 
                 // Spring for individual word highlight
                 const wordFrame = (word.start / 1000) * fps;
@@ -144,7 +154,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
                 });
 
                 const scale = isActive
-                  ? interpolate(wordSpring, [0, 1], [1, 1.15])
+                  ? interpolate(wordSpring, [0, 1], [1, 1.12])
                   : 1;
 
                 return (
@@ -154,18 +164,17 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
                       fontSize,
                       fontFamily,
                       fontWeight: 800,
-                      color: isActive
-                        ? highlightColor
-                        : isPast
-                          ? textColor
-                          : textColor,
+                      color: isActive ? highlightColor : textColor,
+                      opacity: isPast ? 0.7 : 1,
                       textTransform: "uppercase",
-                      textShadow: `0 2px 8px rgba(0,0,0,0.8), 0 0 20px rgba(0,0,0,0.5)`,
-                      WebkitTextStroke: isActive ? "0px" : "1px rgba(0,0,0,0.3)",
+                      textShadow: isActive
+                        ? `0 2px 12px rgba(0,0,0,0.9), 0 0 30px rgba(0,0,0,0.6)`
+                        : `0 2px 8px rgba(0,0,0,0.8), 0 0 20px rgba(0,0,0,0.5)`,
+                      WebkitTextStroke: "1.5px rgba(0,0,0,0.4)",
                       transform: `scale(${scale})`,
                       display: "inline-block",
-                      transition: "color 0.05s ease",
-                      lineHeight: 1.3,
+                      lineHeight: 1.4,
+                      letterSpacing: "0.02em",
                     }}
                   >
                     {word.text.toUpperCase()}

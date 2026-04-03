@@ -14,17 +14,10 @@ interface TranscriptResult {
   srt: string;
 }
 
-interface WhisperToken {
-  text: string;
-  timestamps: { from: string; to: string };
-  offsets: { from: number; to: number };
-}
-
 interface WhisperSegment {
   text: string;
   timestamps: { from: string; to: string };
   offsets: { from: number; to: number };
-  tokens: WhisperToken[];
 }
 
 interface WhisperJson {
@@ -32,17 +25,24 @@ interface WhisperJson {
 }
 
 function findWhisperBinary(): string {
-  // Check common locations for whisper.cpp binary
   const candidates = [
-    "whisper-cli",        // if installed via package manager
-    "whisper",            // alias
-    "main",              // default build name from whisper.cpp
+    "whisper-cli",
+    "whisper",
+    "main",
   ];
 
-  // Check WHISPER_CPP_PATH env var first
   if (process.env.WHISPER_CPP_PATH) {
     const custom = process.env.WHISPER_CPP_PATH;
     if (fs.existsSync(custom)) return custom;
+  }
+
+  // Check common build paths
+  const buildPaths = [
+    "/home/user/whisper.cpp/build/bin/whisper-cli",
+    path.resolve("./whisper.cpp/build/bin/whisper-cli"),
+  ];
+  for (const p of buildPaths) {
+    if (fs.existsSync(p)) return p;
   }
 
   for (const name of candidates) {
@@ -50,35 +50,32 @@ function findWhisperBinary(): string {
       execSync(`which ${name}`, { stdio: "pipe" });
       return name;
     } catch {
-      // not found, try next
+      // not found
     }
   }
 
   throw new Error(
     `whisper.cpp binary not found. Install it:\n` +
       `  git clone https://github.com/ggerganov/whisper.cpp && cd whisper.cpp && make\n` +
-      `  # Download a model:\n` +
       `  bash models/download-ggml-model.sh base\n` +
       `Or set WHISPER_CPP_PATH to the binary location.`
   );
 }
 
 function findWhisperModel(): string {
-  // Check WHISPER_MODEL_PATH env var first
   if (process.env.WHISPER_MODEL_PATH) {
     const custom = process.env.WHISPER_MODEL_PATH;
     if (fs.existsSync(custom)) return custom;
   }
 
-  // Check common locations
   const homeDir = process.env.HOME || process.env.USERPROFILE || "";
   const candidates = [
+    "/home/user/whisper.cpp/models/ggml-base.bin",
     path.join(homeDir, ".local/share/whisper.cpp/ggml-base.bin"),
     path.join(homeDir, ".cache/whisper/ggml-base.bin"),
     path.join(homeDir, "whisper.cpp/models/ggml-base.bin"),
     "./models/ggml-base.bin",
     "./whisper.cpp/models/ggml-base.bin",
-    // Also check for other model sizes
     path.join(homeDir, ".local/share/whisper.cpp/ggml-small.bin"),
     path.join(homeDir, "whisper.cpp/models/ggml-small.bin"),
     "./models/ggml-small.bin",
@@ -105,33 +102,98 @@ function extractAudioAsWav(videoPath: string, outputDir: string): string {
   return wavPath;
 }
 
-function parseWhisperJson(jsonPath: string): {
+/**
+ * Parse whisper JSON output (--max-len 1 --split-on-word mode).
+ * Each segment is a single word with its own timestamp.
+ * Handles collapsed timestamps by interpolating between known good timestamps.
+ */
+function parseWhisperWordJson(jsonPath: string): {
   text: string;
   words: TranscriptWord[];
 } {
   const raw = fs.readFileSync(jsonPath, "utf-8");
   const data: WhisperJson = JSON.parse(raw);
 
-  const allWords: TranscriptWord[] = [];
+  const rawWords: TranscriptWord[] = [];
   const textParts: string[] = [];
 
-  for (const segment of data.transcription) {
-    textParts.push(segment.text.trim());
+  for (const seg of data.transcription) {
+    let text = seg.text.trim();
+    if (!text) continue;
 
-    if (segment.tokens) {
-      for (const token of segment.tokens) {
-        const text = token.text.trim();
-        if (!text) continue;
-        allWords.push({
-          text,
-          start: token.offsets.from,
-          end: token.offsets.to,
-        });
+    // Strip punctuation from the word for the caption
+    const cleanText = text.replace(/[.,!?;:]+$/g, "");
+    if (!cleanText) continue;
+
+    textParts.push(text);
+    rawWords.push({
+      text: cleanText,
+      start: seg.offsets.from,
+      end: seg.offsets.to,
+    });
+  }
+
+  // Fix collapsed timestamps: when multiple consecutive words share
+  // the same start/end, interpolate them across the available range
+  const words = fixCollapsedTimestamps(rawWords);
+
+  return { text: textParts.join(" "), words };
+}
+
+/**
+ * When whisper collapses timestamps at segment boundaries (multiple words
+ * all showing e.g. 7000ms-7000ms), interpolate them between the last
+ * known good timestamp and the next known good start time.
+ * Steals time from the preceding word to give collapsed words room.
+ */
+function fixCollapsedTimestamps(words: TranscriptWord[]): TranscriptWord[] {
+  const result = words.map((w) => ({ ...w }));
+
+  let i = 0;
+  while (i < result.length) {
+    if (result[i].start === result[i].end) {
+      const runStart = i;
+      const collapsedTime = result[i].start;
+      while (
+        i < result.length &&
+        result[i].start === collapsedTime &&
+        result[i].end === collapsedTime
+      ) {
+        i++;
       }
+      const runEnd = i;
+      const runLength = runEnd - runStart;
+
+      // Start of interpolation range: steal 2/3 of previous word's duration
+      let rangeStart = collapsedTime;
+      if (runStart > 0) {
+        const prev = result[runStart - 1];
+        const prevDuration = prev.end - prev.start;
+        rangeStart = prev.start + Math.floor(prevDuration / 3);
+        result[runStart - 1].end = rangeStart - 10;
+      }
+
+      // End of interpolation range: next word's start, or estimate
+      let rangeEnd = collapsedTime + runLength * 300;
+      if (runEnd < result.length) {
+        rangeEnd = result[runEnd].start;
+      }
+
+      const totalDuration = rangeEnd - rangeStart;
+      const perWord = totalDuration / runLength;
+
+      for (let j = 0; j < runLength; j++) {
+        result[runStart + j].start = Math.round(rangeStart + j * perWord);
+        result[runStart + j].end = Math.round(
+          rangeStart + (j + 1) * perWord - 20
+        );
+      }
+    } else {
+      i++;
     }
   }
 
-  return { text: textParts.join(" "), words: allWords };
+  return result;
 }
 
 function wordsToSrt(words: TranscriptWord[]): string {
@@ -186,13 +248,13 @@ export async function transcribeVideo(
   console.log("[1/3] Extracting audio from video...");
   const wavPath = extractAudioAsWav(videoPath, outputDir);
 
-  // Step 2: Run whisper.cpp with JSON output for word-level timestamps
+  // Step 2: Run whisper.cpp with per-word segments for accurate timestamps
   console.log("[2/3] Transcribing with whisper.cpp (this may take a while)...");
   const jsonOutputBase = path.join(outputDir, "whisper-output");
 
   execSync(
-    `"${whisperBin}" -m "${whisperModel}" -f "${wavPath}" --output-json -of "${jsonOutputBase}" --print-progress`,
-    { stdio: "inherit", timeout: 600000 } // 10 min timeout
+    `"${whisperBin}" -m "${whisperModel}" -f "${wavPath}" --output-json --max-len 1 --split-on-word -of "${jsonOutputBase}" --print-progress`,
+    { stdio: "inherit", timeout: 600000 }
   );
 
   // Step 3: Parse results
@@ -205,7 +267,7 @@ export async function transcribeVideo(
     );
   }
 
-  const { text, words } = parseWhisperJson(jsonPath);
+  const { text, words } = parseWhisperWordJson(jsonPath);
   const srt = wordsToSrt(words);
 
   // Save outputs
@@ -217,10 +279,10 @@ export async function transcribeVideo(
   fs.writeFileSync(srtPath, srt);
   fs.writeFileSync(wordsPath, JSON.stringify(words, null, 2));
 
-  console.log("  Transcript saved to:", transcriptPath);
-  console.log("  SRT saved to:", srtPath);
+  console.log(`  Transcript: ${words.length} words`);
+  console.log("  Saved to:", transcriptPath);
 
-  // Clean up WAV file (large)
+  // Clean up WAV file
   fs.unlinkSync(wavPath);
 
   return { text, words, srt };
