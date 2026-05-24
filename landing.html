@@ -264,9 +264,13 @@
 
   .testimonials-grid {
     margin-top: 48px;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 20px;
+    columns: 3;
+    column-gap: 16px;
+  }
+
+  .testimonials-grid .testimonial-card {
+    break-inside: avoid;
+    margin-bottom: 16px;
   }
 
   .testimonial-card {
@@ -379,8 +383,7 @@
       margin-right: auto;
     }
     .testimonials-grid {
-      grid-template-columns: 1fr;
-      gap: 16px;
+      columns: 1;
     }
   }
 </style>
@@ -473,13 +476,43 @@
 
     <div class="testimonials-grid">
       <div class="testimonial-card">
-        <img src="testimonial-1.png" alt="Client testimonial screenshot" loading="lazy">
+        <img src="img/testimonial-stellar.png" alt="Client: You've got a stellar thing set up here and you delivered on our agreement" loading="lazy">
       </div>
       <div class="testimonial-card">
-        <img src="testimonial-2.png" alt="Client testimonial screenshot" loading="lazy">
+        <img src="img/testimonial-changed-life.png" alt="Client: You guys have literally changed my life" loading="lazy">
       </div>
       <div class="testimonial-card">
-        <img src="testimonial-3.png" alt="Client testimonial screenshot" loading="lazy">
+        <img src="img/testimonial-jenny.png" alt="Client: I just finished my date with Jenny" loading="lazy">
+      </div>
+      <div class="testimonial-card">
+        <img src="img/testimonial-hinge-raya.png" alt="Client: the hinge/raya is firing btw, game changer actually" loading="lazy">
+      </div>
+      <div class="testimonial-card">
+        <img src="img/testimonial-tiffany.png" alt="Client: hey just went on a date tiffany had a great time with her" loading="lazy">
+      </div>
+      <div class="testimonial-card">
+        <img src="img/testimonial-another-day.png" alt="Client: another day another lay" loading="lazy">
+      </div>
+      <div class="testimonial-card">
+        <img src="img/testimonial-three-dates.png" alt="Client: this past Sunday, this past Monday, this past Tuesday — all at my place" loading="lazy">
+      </div>
+      <div class="testimonial-card">
+        <img src="img/testimonial-bar.png" alt="Client: I went to a bar with all of them" loading="lazy">
+      </div>
+      <div class="testimonial-card">
+        <img src="img/testimonial-good-time.png" alt="Client: Yeah, we met and had a good time" loading="lazy">
+      </div>
+      <div class="testimonial-card">
+        <img src="img/testimonial-dates-tomorrow.png" alt="Client: have a date tomorrow with yao and friday with riv" loading="lazy">
+      </div>
+      <div class="testimonial-card">
+        <img src="img/testimonial-closed.png" alt="Client: closed, she was actually rly cool" loading="lazy">
+      </div>
+      <div class="testimonial-card">
+        <img src="img/testimonial-my-type.png" alt="Client: Yeah she's my type for sure" loading="lazy">
+      </div>
+      <div class="testimonial-card">
+        <img src="img/testimonial-gray.png" alt="Client: I went out with Gray it was pretty dope and thanks" loading="lazy">
       </div>
     </div>
 
